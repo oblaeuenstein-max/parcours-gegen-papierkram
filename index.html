@@ -30,8 +30,8 @@
   const HORSES = [
     { name: 'Caipi 15', sub: 'Dunkelbraun', desc: 'Springt am höchsten.', jump: 870, speed: 1, lives: 1, bulk: 1,
       coat: '#4b2d1b', dark: '#38200f', mane: '#140b05', hoof: '#120a05', eye: '#000', stats: [5, 3, 1] },
-    { name: 'Diego W', sub: 'Schimmel, kräftiger Holsteiner', desc: 'Verzeiht einen Abwurf: 2 Leben.', jump: 770, speed: 0.94, lives: 2, bulk: 1.2,
-      coat: '#e8e8e3', dark: '#c6c6c0', mane: '#a9a9a3', hoof: '#4a4a4a', eye: '#111', stats: [3, 2, 2] },
+    { name: 'Diego W', sub: 'Schimmel, kräftiger Holsteiner', desc: 'Verzeiht zwei Abwürfe: 3 Leben.', jump: 770, speed: 0.94, lives: 3, bulk: 1.2,
+      coat: '#e8e8e3', dark: '#c6c6c0', mane: '#a9a9a3', hoof: '#4a4a4a', eye: '#111', stats: [3, 2, 3] },
     { name: 'Jaguar', sub: 'Rappe', desc: 'Der Schnellste. Mehr Tempo, mehr Punkte.', jump: 770, speed: 1.22, lives: 1, bulk: 0.94,
       coat: '#1d1d22', dark: '#0e0e12', mane: '#000', hoof: '#000', eye: '#ddd', stats: [3, 5, 1] }
   ];
@@ -115,7 +115,12 @@
     } else nextGap = speed * 0.9 + 220;
   }
 
+  let freeze = 0, squash = 0, flash = 0;
+  function dust(n, spread) {
+    for (let i = 0; i < n; i++) parts.push({ dot: true, x: horse.x - 20 + Math.random() * 40, y: GROUND - 2, vx: (Math.random() - 0.5) * spread, vy: -30 - Math.random() * 90, r: 3 + Math.random() * 5, vr: 0, t: 0 });
+  }
   function doJump() {
+    dust(6, 160);
     horse.vy = jumpHeld ? run.jump : Math.min(run.jump, CUT + 160);
     horse.ground = false; buffer = 0;
   }
@@ -191,7 +196,7 @@
   }
 
   function onHit(o) {
-    o.hit = true; shake = 0.3;
+    o.hit = true; shake = 0.3; freeze = 0.09; flash = 1;
     const top = o.type === 'duck' ? GROUND - o.clear : GROUND - o.h;
     if (o.type === 'wasser') burst(o.x + 50, GROUND - 4, ['#4aa3df', '#bfe3fb'], 16);
     else if (o.type === 'duck') burst(o.x + o.w / 2, top, o.ast ? ['#3f8f3a', '#6fb46a'] : ['#c0392b', '#fff'], 12);
@@ -235,8 +240,9 @@
     if (!horse.ground) {
       horse.y += horse.vy * dt;
       horse.vy -= G * (dk ? 2.6 : 1) * dt;
-      if (horse.y <= 0) { horse.y = 0; horse.vy = 0; horse.ground = true; if (buffer > 0) doJump(); }
-    }
+      if (horse.y <= 0) { horse.y = 0; horse.vy = 0; horse.ground = true; squash = 1; dust(10, 260); if (buffer > 0) doJump(); }
+    } else if (Math.random() < dt * 14) dust(1, 60);
+    squash = Math.max(0, squash - dt * 6);
 
     nextGap -= dx;
     if (nextGap <= 0) {
@@ -278,8 +284,9 @@
 
   function updateFx(dt, dx) {
     if (shake > 0) shake -= dt;
-    for (const p of parts) { p.t += dt; p.x += p.vx * dt - dx; p.y += p.vy * dt; p.vy += 900 * dt; p.r += p.vr * dt; if (p.y > GROUND - 3) { p.y = GROUND - 3; p.vy = 0; p.vx *= 0.9; p.vr = 0; } }
-    parts = parts.filter(p => p.x > -30 && p.t < 3);
+    if (flash > 0) flash -= dt * 4;
+    for (const p of parts) { p.t += dt; p.x += p.vx * dt - dx; p.y += p.vy * dt; p.vy += (p.dot ? 120 : 900) * dt; p.r += p.vr * dt; if (p.y > GROUND - 3) { p.y = GROUND - 3; p.vy = 0; p.vx *= 0.9; p.vr = 0; } }
+    parts = parts.filter(p => p.x > -30 && p.t < (p.dot ? 0.55 : 3));
     for (const f of floats) { f.t += dt * (f.big ? 0.6 : 1); f.y -= 40 * dt; f.x -= dx * (f.big ? 0 : 0.3); }
     floats = floats.filter(f => f.t < 1);
   }
@@ -304,6 +311,9 @@
     const g = ctx.createLinearGradient(0, 0, 0, GROUND);
     g.addColorStop(0, '#8fc7ee'); g.addColorStop(1, '#e6f3fb');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, GROUND);
+    const sg = ctx.createRadialGradient(660, 70, 8, 660, 70, 90);
+    sg.addColorStop(0, 'rgba(255,244,200,1)'); sg.addColorStop(0.25, 'rgba(255,236,160,0.9)'); sg.addColorStop(1, 'rgba(255,236,160,0)');
+    ctx.fillStyle = sg; ctx.fillRect(560, 0, 200, 170);
     ctx.fillStyle = 'rgba(255,255,255,0.9)';
     for (const c of clouds) {
       ctx.beginPath();
@@ -324,8 +334,22 @@
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 292, W, 5); ctx.fillRect(0, 308, W, 5);
     for (let x = -90; x < W + 90; x += 90) ctx.fillRect(x - off3, 284, 7, 46);
-    ctx.fillStyle = '#e3c58f'; ctx.fillRect(0, GROUND, W, H - GROUND);
-    ctx.fillStyle = '#d2b077'; ctx.fillRect(0, GROUND, W, 4);
+    // Bäume und Tribüne am Zaun
+    const off5 = (dist * 0.4) % 520;
+    for (let x = -520; x < W + 520; x += 520) {
+      const bx = x - off5;
+      ctx.fillStyle = '#5b3a22'; ctx.fillRect(bx + 96, 246, 8, 44);
+      ctx.fillStyle = '#3f8f3a'; ctx.beginPath(); ctx.arc(bx + 100, 232, 26, 0, 7); ctx.arc(bx + 82, 246, 18, 0, 7); ctx.arc(bx + 118, 246, 18, 0, 7); ctx.fill();
+      ctx.fillStyle = '#d9dee2'; ctx.fillRect(bx + 300, 250, 130, 40);
+      ctx.fillStyle = '#c0392b'; ctx.beginPath(); ctx.moveTo(bx + 292, 250); ctx.lineTo(bx + 438, 250); ctx.lineTo(bx + 428, 236); ctx.lineTo(bx + 302, 236); ctx.fill();
+      const cc = ['#2471a3', '#f0c9a4', '#1e8449', '#d68910', '#6c3483', '#f5f5f5'];
+      for (let k = 0; k < 14; k++) { ctx.fillStyle = cc[k % 6]; ctx.beginPath(); ctx.arc(bx + 310 + (k % 7) * 18, 262 + Math.floor(k / 7) * 13 + Math.sin(phase * 0.5 + k) * 1.2, 4, 0, 7); ctx.fill(); }
+    }
+    const gg = ctx.createLinearGradient(0, GROUND, 0, H);
+    gg.addColorStop(0, '#e8cc98'); gg.addColorStop(1, '#cfa96c');
+    ctx.fillStyle = gg; ctx.fillRect(0, GROUND, W, H - GROUND);
+    ctx.fillStyle = '#5fa85a'; ctx.fillRect(0, GROUND - 3, W, 4);
+    ctx.fillStyle = '#d2b077'; ctx.fillRect(0, GROUND + 1, W, 3);
     const off4 = dist % 60;
     ctx.fillStyle = 'rgba(160,120,60,0.35)';
     for (let x = -60; x < W + 60; x += 60) { ctx.fillRect(x - off4, GROUND + 22, 14, 3); ctx.fillRect(x - off4 + 30, GROUND + 46, 20, 3); }
@@ -523,13 +547,30 @@
     if (shake > 0) ctx.translate((Math.random() - 0.5) * 24 * shake, (Math.random() - 0.5) * 14 * shake);
     drawBg();
     for (const o of obstacles) drawObstacle(o);
-    if (run && state !== 'select' && !(invuln > 0 && state === 'play' && Math.floor(invuln * 14) % 2))
+    for (const p of parts) if (p.dot) { ctx.globalAlpha = Math.max(0, 0.55 * (1 - p.t / 0.55)); ctx.fillStyle = '#c9a56a'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + p.t * 2), 0, 7); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    if (run && state !== 'select' && !(invuln > 0 && state === 'play' && Math.floor(invuln * 14) % 2)) {
+      ctx.save(); ctx.translate(horse.x, GROUND); ctx.scale(1 + squash * 0.07, 1 - squash * 0.1); ctx.translate(-horse.x, -GROUND);
       drawHorse(run.h, horse.x, GROUND, horse.y, horse.vy, !horse.ground, horse.d, phase, 1);
-    for (const p of parts) { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.col; ctx.fillRect(-7, -2.5, 14, 5); ctx.restore(); }
-    for (const f of floats) { ctx.globalAlpha = 1 - f.t; text(f.txt, f.x, f.y, f.big ? 34 : 20, f.col, 'center'); ctx.globalAlpha = 1; }
+      ctx.restore();
+    }
+    if (state === 'play' && speed > 420) {
+      ctx.strokeStyle = 'rgba(255,255,255,' + Math.min(0.5, (speed - 420) / 500) + ')'; ctx.lineWidth = 2;
+      for (let i = 0; i < 5; i++) { const lx = W - ((dist * 2.2 + i * 190) % (W + 200)), ly = 120 + i * 37; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + 60, ly); ctx.stroke(); }
+    }
+    for (const p of parts) if (!p.dot) { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r); ctx.fillStyle = p.col; ctx.fillRect(-7, -2.5, 14, 5); ctx.restore(); }
+    for (const f of floats) {
+      const pop = 1 + Math.max(0, 0.25 - f.t) * 2;
+      ctx.globalAlpha = 1 - f.t; ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineJoin = 'round';
+      ctx.font = '700 ' + (f.big ? 34 : 20) * pop + 'px system-ui, "Segoe UI", sans-serif'; ctx.textAlign = 'center'; ctx.strokeText(f.txt, f.x, f.y);
+      text(f.txt, f.x, f.y, (f.big ? 34 : 20) * pop, f.col, 'center'); ctx.globalAlpha = 1;
+    }
     ctx.restore();
+    if (flash > 0) { ctx.fillStyle = 'rgba(192,57,43,' + flash * 0.28 + ')'; ctx.fillRect(0, 0, W, H); }
 
     if (run && state !== 'select') {
+      ctx.fillStyle = 'rgba(255,255,255,0.72)'; rr(8, 8, 150, 50, 10); ctx.fill();
+      rr(W / 2 - 120, 9, 240, 26, 13); ctx.fill();
       text('Punkte ' + score(), 18, 30, 22, '#14201a');
       text('Rekord ' + Math.max(best, score()), 18, 50, 13, '#2e4a3b', 'left', 600);
       text('Umlauf ' + round + '   Hindernis ' + Math.min(idx, course.length) + '/' + course.length, W / 2, 26, 14, '#14201a', 'center');
@@ -555,7 +596,8 @@
 
   let last = performance.now();
   function frame(now) {
-    const dt = Math.min(0.033, (now - last) / 1000); last = now;
+    let dt = Math.min(0.033, (now - last) / 1000); last = now;
+    if (freeze > 0) { freeze -= dt; dt = 0; }
     update(dt); draw();
     requestAnimationFrame(frame);
   }
