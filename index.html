@@ -45,8 +45,10 @@
     { id: 'calm', name: 'Versammlung', desc: 'Tempo 8% tiefer, mehr Zeit zum Reagieren.', col: '#6c3483', apply: r => { r.speedMul *= 0.92; } }
   ];
 
-  let best = 0;
-  try { best = parseInt(localStorage.getItem('pgp_best2') || '0', 10) || 0; } catch (e) {}
+  let best = 0, mode = location.hash.includes('endlos') ? 'endlos' : 'parcours';
+  const bestKey = () => mode === 'endlos' ? 'pgp_best_endlos' : 'pgp_best2';
+  function loadBest() { best = 0; try { best = parseInt(localStorage.getItem(bestKey()) || '0', 10) || 0; } catch (e) {} }
+  loadBest();
 
   let state = 'select', sel = 0, uiT = 0, overT = 0, phase = 0, dist = 0;
   let run = null, round = 0, course = [], idx = 0, zielSpawned = false, faults = 0, shieldReady = false, cleared = 0;
@@ -63,17 +65,37 @@
   function startRun(h) {
     run = { h, lives: h.lives, jump: h.jump, speedMul: h.speed, scoreMul: 1, shield: false };
     pts = 0; cleared = 0; newBest = false; dist = 0;
+    loadBest();
     startRound(1);
   }
 
+  function pick(n) {
+    const pool = [['steil', 3], ['duck', 2.2], ['oxer', 2]];
+    if (n >= 2) pool.push(['mauer', 1.5], ['triple', 1.5], ['wasser', 1.3]);
+    let r = Math.random() * pool.reduce((s, p) => s + p[1], 0);
+    for (const p of pool) { r -= p[1]; if (r <= 0) return p[0]; }
+    return 'steil';
+  }
+
+  // Unendlich: kein Ziel, alle 8 Hindernisse eine Stufe höher und schneller, alle 12 ein Hufeisen
+  function spawnEndless() {
+    idx++;
+    round = 1 + Math.floor(idx / 8);
+    speed = Math.min(800, 330 * run.speedMul * (1 + 0.06 * (round - 1)));
+    const o = make(idx % 12 === 0 ? 'huf' : idx === 1 ? 'steil' : pick(round));
+    if (o.type !== 'huf') o.num = idx;
+    obstacles.push(o);
+    nextGap = speed * (0.85 + Math.random() * 0.6) + 150 + o.w;
+  }
+
   function startRound(n) {
-    round = n; course = buildCourse(n); idx = 0; zielSpawned = false; faults = 0;
+    round = n; course = mode === 'endlos' ? [] : buildCourse(n); idx = 0; zielSpawned = false; faults = 0;
     shieldReady = run.shield;
     speed = Math.min(780, 330 * run.speedMul * (1 + 0.07 * (n - 1)));
     obstacles = []; parts = []; floats = [];
     horse = { x: 140, y: 0, vy: 0, ground: true, d: 0 };
     nextGap = 380; invuln = 0; buffer = 0; jumpHeld = false;
-    floats.push({ x: W / 2, y: 150, txt: 'Umlauf ' + n, col: '#14201a', t: 0, big: true });
+    floats.push({ x: W / 2, y: 150, txt: mode === 'endlos' ? 'Unendlich' : 'Umlauf ' + n, col: '#14201a', t: 0, big: true });
     state = 'play';
   }
 
@@ -102,7 +124,8 @@
     else if (type === 'triple') { o.h = Math.min(86, 56 + 4 * r); o.w = 68; o.boxes = [{ x: 4, w: 12, h: o.h * 0.5 }, { x: 28, w: 12, h: o.h * 0.75 }, { x: 52, w: 12, h: o.h }]; }
     else if (type === 'mauer') { o.h = Math.min(100, 58 + 5 * r); o.w = 34; o.boxes = [{ x: 0, w: 34, h: o.h }]; }
     else if (type === 'wasser') { o.h = 24; o.w = 112; o.boxes = [{ x: 0, w: 12, h: 24 }, { x: 12, w: 100, h: 7 }]; }
-    else if (type === 'duck') { o.clear = 88; o.w = 80 + Math.random() * 30; o.ast = Math.random() < 0.5; }
+    else if (type === 'duck') { o.clear = 88; o.ast = Math.random() < 0.5; o.w = o.ast ? 80 + Math.random() * 30 : 66 + Math.random() * 18; o.bh = o.ast ? 999 : 34; }
+    else if (type === 'huf') { o.w = 20; o.hy = 96; }
     return o;
   }
 
@@ -141,6 +164,13 @@
   }
   function toSelect() { state = 'select'; uiT = 0; }
 
+  function setMode(m) { mode = m; loadBest(); }
+  function modeAt(e) {
+    const r = cv.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
+    if (y < 16 || y > 58) return -1;
+    return x >= 540 && x < 656 ? 0 : x >= 656 && x <= 772 ? 1 : -1;
+  }
   const cardX = i => 30 + i * 250;
   function cardAt(e) {
     const r = cv.getBoundingClientRect();
@@ -160,6 +190,7 @@
     } else if (state === 'over') {
       if ((c === 'Space' || c === 'Enter') && overT > 0.7) toSelect();
     } else {
+      if (c === 'KeyM' && state === 'select') setMode(mode === 'endlos' ? 'parcours' : 'endlos');
       if (c === 'ArrowLeft') sel = (sel + 2) % 3;
       if (c === 'ArrowRight') sel = (sel + 1) % 3;
       if (c === 'Digit1') choose(0);
@@ -179,7 +210,11 @@
       ptr.set(e.pointerId, side);
       if (side === 'jump') jumpPress();
     } else if (state === 'over') { if (overT > 0.7) toSelect(); }
-    else { const i = cardAt(e); if (i >= 0) { sel = i; choose(i); } }
+    else {
+      const m = state === 'select' ? modeAt(e) : -1;
+      if (m >= 0) setMode(m ? 'endlos' : 'parcours');
+      else { const i = cardAt(e); if (i >= 0) { sel = i; choose(i); } }
+    }
   }, { passive: false });
   function pup(e) { const s = ptr.get(e.pointerId); ptr.delete(e.pointerId); if (s === 'jump') jumpRelease(); }
   window.addEventListener('pointerup', pup);
@@ -192,7 +227,7 @@
 
   function gameOver() {
     state = 'over'; overT = 0;
-    if (score() > best) { best = score(); newBest = true; try { localStorage.setItem('pgp_best2', String(best)); } catch (e) {} }
+    if (score() > best) { best = score(); newBest = true; try { localStorage.setItem(bestKey(), String(best)); } catch (e) {} }
   }
 
   function onHit(o) {
@@ -213,11 +248,11 @@
   }
 
   // Testmodus: mit #auto in der Adresse reitet das Spiel selbst
-  const AUTO = location.hash === '#auto';
+  const AUTO = location.hash.startsWith('#auto');
   if (AUTO) window.__pgp = () => ({ state, round, lives: run && run.lives, pts: score(), cleared, faults });
   function autopilot() {
     keyDuck = false;
-    const o = obstacles.find(q => q.type !== 'ziel' && !q.hit && q.x + q.w > horse.x - 24);
+    const o = obstacles.find(q => q.type !== 'ziel' && q.type !== 'huf' && !q.hit && q.x + q.w > horse.x - 24);
     if (!o) return;
     if (o.type === 'duck') { keyDuck = o.x - horse.x < 70; return; }
     if (horse.ground && o.x + o.w / 2 - horse.x <= speed * run.jump / G) { jumpHeld = true; doJump(); }
@@ -246,7 +281,8 @@
 
     nextGap -= dx;
     if (nextGap <= 0) {
-      if (idx < course.length) spawn();
+      if (mode === 'endlos') spawnEndless();
+      else if (idx < course.length) spawn();
       else if (!zielSpawned) { obstacles.push({ type: 'ziel', x: W + 40, w: 10 }); zielSpawned = true; nextGap = 1e9; }
     }
 
@@ -266,16 +302,24 @@
         }
         continue;
       }
+      if (o.type === 'huf') {
+        if (!o.done && Math.abs(o.x - horse.x) < 32 && elev < o.hy + 16 && top > o.hy - 16) {
+          o.done = true; o.x = -999; run.lives++;
+          floats.push({ x: horse.x + 10, y: GROUND - horse.y - 120, txt: 'Hufeisen! +1 Leben', col: '#b7950b', t: 0 });
+        }
+        continue;
+      }
       if (o.hit) { o.fall = Math.min(1, o.fall + dt * 5); continue; }
       let hit = false;
       if (invuln <= 0) {
-        if (o.type === 'duck') hit = hr > o.x + 8 && hl < o.x + o.w - 8 && top > o.clear + 2;
+        if (o.type === 'duck') { hit = hr > o.x + 8 && hl < o.x + o.w - 8 && top > o.clear + 2 && elev < o.clear + o.bh - 4; if (!hit && hr > o.x + 8 && hl < o.x + o.w - 8 && elev >= o.clear + o.bh - 4) o.over = true; }
         else for (const b of o.boxes) if (hr > o.x + b.x + 2 && hl < o.x + b.x + b.w - 2 && elev < b.h - 3) { hit = true; break; }
       }
       if (hit) { onHit(o); if (state !== 'play') break; }
       else if (!o.done && o.x + o.w < hl) {
-        o.done = true; cleared++; pts += 10 * run.scoreMul;
-        floats.push({ x: horse.x + 10, y: GROUND - horse.y - 120, txt: '+' + Math.round(10 * run.scoreMul), col: '#1e8449', t: 0 });
+        const gain = (o.over ? 30 : 10) * run.scoreMul;
+        o.done = true; cleared++; pts += gain;
+        floats.push({ x: horse.x + 10, y: GROUND - horse.y - 120, txt: (o.over ? 'Drüber! +' : '+') + Math.round(gain), col: o.over ? '#b7950b' : '#1e8449', t: 0 });
       }
     }
     obstacles = obstacles.filter(o => o.x + o.w > -140);
@@ -392,6 +436,12 @@
       text('ZIEL', x + 31, GROUND - 198, 14, '#14201a', 'center');
       return;
     }
+    if (o.type === 'huf') {
+      const hy = GROUND - o.hy + Math.sin(phase * 0.4) * 4;
+      ctx.fillStyle = 'rgba(255,220,90,0.35)'; ctx.beginPath(); ctx.arc(x, hy, 20, 0, 7); ctx.fill();
+      shoe(x, hy, true, '#c9a227');
+      return;
+    }
     sign(o);
     if (o.type === 'steil') fence(x, o.h, o.col, f, 3);
     else if (o.type === 'oxer') { fence(x, o.h, o.col, f, 2); fence(x + 34, o.h, o.col, f, 2); }
@@ -427,10 +477,10 @@
         ctx.restore();
       } else {
         ctx.fillStyle = '#dcdcd6'; ctx.fillRect(x, GROUND - 190, 5, 180); ctx.fillRect(x + o.w - 5, GROUND - 190, 5, 180);
-        ctx.save(); ctx.translate(x, yb - 46); ctx.rotate(f * 0.25);
-        ctx.fillStyle = '#c0392b'; ctx.fillRect(0, 0, o.w, 46);
-        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, o.w, 5); ctx.fillRect(0, 41, o.w, 5);
-        text('KOPF', o.w / 2, 20, 12, '#fff', 'center'); text('RUNTER', o.w / 2, 34, 12, '#fff', 'center');
+        ctx.save(); ctx.translate(x, yb - 34); ctx.rotate(f * 0.25);
+        ctx.fillStyle = '#c0392b'; ctx.fillRect(0, 0, o.w, 34);
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, o.w, 4); ctx.fillRect(0, 30, o.w, 4);
+        text('KOPF', o.w / 2, 15, 10.5, '#fff', 'center'); text('RUNTER', o.w / 2, 26, 10.5, '#fff', 'center');
         ctx.restore();
       }
     }
@@ -507,8 +557,13 @@
 
   function drawSelect() {
     ctx.fillStyle = 'rgba(20,32,26,0.55)'; ctx.fillRect(0, 0, W, H);
-    text('Parcours gegen Papierkram', W / 2, 40, 28, '#fff', 'center');
-    text('Wähle dein Pferd', W / 2, 66, 16, '#ffd66b', 'center', 600);
+    text('Parcours gegen Papierkram', 32, 40, 28, '#fff');
+    text('Wähle dein Pferd' + (best ? '   Rekord ' + best : ''), 32, 66, 16, '#ffd66b', 'left', 600);
+    ['Parcours', 'Unendlich'].forEach((n, i) => {
+      const on = (mode === 'endlos') === (i === 1);
+      ctx.fillStyle = on ? '#ffd66b' : 'rgba(255,255,255,0.18)'; rr(544 + i * 116, 22, 110, 32, 16); ctx.fill();
+      text(n, 599 + i * 116, 43, 15, on ? '#14201a' : '#fff', 'center');
+    });
     HORSES.forEach((h, i) => {
       const x = card(i, i === sel);
       drawHorse(h, x + 112, 200, 0, 0, false, 0, phase + i, 0.95);
@@ -573,7 +628,7 @@
       rr(W / 2 - 120, 9, 240, 26, 13); ctx.fill();
       text('Punkte ' + score(), 18, 30, 22, '#14201a');
       text('Rekord ' + Math.max(best, score()), 18, 50, 13, '#2e4a3b', 'left', 600);
-      text('Umlauf ' + round + '   Hindernis ' + Math.min(idx, course.length) + '/' + course.length, W / 2, 26, 14, '#14201a', 'center');
+      text(mode === 'endlos' ? 'Unendlich   Stufe ' + round + '   Hindernis ' + idx : 'Umlauf ' + round + '   Hindernis ' + Math.min(idx, course.length) + '/' + course.length, W / 2, 26, 14, '#14201a', 'center');
       const n = Math.max(run.lives, run.h.lives);
       for (let i = 0; i < n; i++) shoe(W - 26 - i * 28, 22, i < run.lives);
       if (run.shield) shoe(W - 26 - n * 28 - 6, 22, shieldReady, '#2471a3');
@@ -587,7 +642,7 @@
     else if (state === 'shop') drawShop();
     else if (state === 'over') {
       ctx.fillStyle = 'rgba(20,32,26,0.84)'; rr(W / 2 - 250, 80, 500, 190, 14); ctx.fill();
-      text('Ausgeschieden in Umlauf ' + round, W / 2, 126, 28, '#fff', 'center');
+      text(mode === 'endlos' ? 'Ausgeschieden auf Stufe ' + round : 'Ausgeschieden in Umlauf ' + round, W / 2, 126, 28, '#fff', 'center');
       text(score() + ' Punkte, ' + cleared + ' Hindernisse fehlerfrei', W / 2, 162, 18, '#dfeee5', 'center', 500);
       text(newBest ? 'Neuer Rekord!' : 'Rekord: ' + best, W / 2, 196, 18, newBest ? '#ffd66b' : '#dfeee5', 'center', 600);
       if (overT > 0.7) text('Tippen für die Pferdewahl', W / 2, 238, 20, '#ffd66b', 'center');
